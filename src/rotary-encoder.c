@@ -3,7 +3,7 @@
  * @file rotary-encoder.c
  *
  * @author (STUDENTS -- Nolan Hill)
- * @author (STUDENTS -- TYPE YOUR NAME HERE)
+ * @author (STUDENTS -- Nick Goertzen)
  *
  * @brief Code to determine the direction that a rotary encoder is turning.
  *
