@@ -33,8 +33,11 @@ static uint8_t entered_combination[3];
 static int visible_counts[3] = {0, 0, 0};
 static uint8_t current_number = 0;
 static int entry_stage = 0;
-static bool handle_right_press = false;
+static bool handle_keypress = false;
 static cowpi_timer_t volatile *timer;
+int digit_index = 0;
+uint8_t new_combination[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+key_t handle_key;
 
 uint8_t const *get_combination() {
 return combination;
@@ -117,15 +120,12 @@ void initialize_lock_controller() {
     cowpi_illuminate_left_led();
     cowpi_deluminate_right_led();
     rotate_full_clockwise();
-    //force_combination_reset();
     display_combination();
 }
 
 void control_lock() {
     direction_t dir = get_direction();
     char result[16];
-    sprintf(result, "%d %d %d", visible_counts[0], visible_counts[1], visible_counts[2]);
-    display_string(3, result);
 
     if (state == ALARMED) {
         while (true) {
@@ -135,13 +135,24 @@ void control_lock() {
         
         if (entry_stage < 3) {
             if (dir == correct_direction) {
-                if (current_number + 1 == combination[entry_stage]) {
+                int dir_num = (correct_direction == CLOCKWISE) ? 1 : -1;
+                if (current_number + dir_num == combination[entry_stage]) {
                     visible_counts[entry_stage]++;
                 }  
-                if (current_number < 15) {
-                    current_number++;
-                } else {
-                    current_number = 0;
+                if (current_number < 15 && current_number > 0) {
+                    (correct_direction == CLOCKWISE) ? current_number++ : current_number--;
+                } else if (dir == CLOCKWISE) {
+                    if (current_number == 0) {
+                        current_number++;
+                    } else {
+                        current_number = 0;
+                    }
+                } else if (dir == COUNTERCLOCKWISE) {
+                    if (current_number == 15) {
+                        current_number--;
+                    } else {
+                        current_number = 15;
+                    }
                 } 
             } else if (dir != correct_direction && dir != STATIONARY) {
                 entry_stage++;
@@ -174,60 +185,95 @@ void control_lock() {
         if (cowpi_left_button_is_pressed() && cowpi_right_button_is_pressed()) {
             clear_combination();
             bad_tries = 0;
+            display_string(0, "");
             state = LOCKED;
         }
     } else if(state == CHANGING) {
-        uint8_t new_combination1[3] = {0xFF, 0xFF, 0xFF};
-        uint8_t new_combination2[3] = {0xFF, 0xFF, 0xFF};
+        char combo_display[32] = "";
+        char part[6];
+        for (int i = 0; i < 6; i++) {
+            if (i == 3) {
+                strcat(combo_display, "    ");
+            }
+            if (new_combination[i] == 0xFF) {
+                strcat(combo_display, "  ");
+            } else {
+                sprintf(part, "%02d", new_combination[i]);
+                strcat(combo_display, part);
+            }
+            
+            strcat(combo_display, (i < 5 && i != 2) ? "-" : " ");
+        }
 
-        // TODO: implement inputing new combinations from keypad.
+        key_t key = cowpi_get_keypress();
+        
+        if (key >= '0' && key <= '9' && digit_index < 6 && !handle_keypress) {
+            handle_key = key - '0';
+            handle_keypress = true;
+        }
+        if (handle_keypress && key == NULL) {
+            if (new_combination[digit_index] == 0xFF) {
+                new_combination[digit_index] = 0;
+                new_combination[digit_index] += 10 * handle_key;
+            } else {
+                new_combination[digit_index] += handle_key;
+                digit_index++;
+            }
+            handle_keypress = false;
+        }
         if (cowpi_left_switch_is_in_left_position()) {
             bool incomplete = false;
             bool mismatch = false;
             bool out_of_bounds = false;
 
             for (int i = 0; i < 3; i++) {
-                if (new_combination1[i] == 0xFF || new_combination2[i] == 0xFF) {
+                if (new_combination[i] == 0xFF || new_combination[i + 3] == 0xFF) {
                     incomplete = true;
                 }
-                if (new_combination1[i] != new_combination2[i]) {
+                if (new_combination[i] != new_combination[i + 3]) {
                     mismatch = true;
                 }
-                if (new_combination1[i] > 15) {
+                if (new_combination[i] > 15 || new_combination[i + 3] > 15) {
                     out_of_bounds = true;
                 }
             }
 
             if (incomplete || mismatch || out_of_bounds) {
-                display_string(0, "no change");
+                display_string(2, "no change");
             } else {
                 for (int i = 0; i < 3; i++) {
-                    combination[i] = new_combination1[i];
+                    combination[i] = new_combination[i];
                 }
-                display_string(0, "changed");
-                state = UNLOCKED;
-                cowpi_deluminate_left_led();
-                cowpi_illuminate_right_led();
+                display_string(2, "changed");
+            }
+            state = UNLOCKED;
+            digit_index = 0;
+            for (int i = 0; i < 6 ; i++) {
+                new_combination[i] = 0xFF;
             }
         }
+        display_string(1, combo_display);
     }
     if (state == LOCKED) {
         cowpi_illuminate_left_led();
         cowpi_deluminate_right_led();
         rotate_full_clockwise();
         if (bad_tries > 0) {
-            char temp[15];
+            char temp[19];
             sprintf(temp, "%s%d", "bad try ", bad_tries);
             display_string(0, temp);
         }
+        display_string(2, " ");
         display_combination();
     } else if (state == UNLOCKED) {
         cowpi_deluminate_left_led();
         cowpi_illuminate_right_led();
         rotate_full_counterclockwise();
         display_string(0, "OPEN");
+        display_string(1, " ");
     } else if (state == ALARMED) {
         display_string(0, "alert!");
+        display_string(1, " ");
     } else if (state == CHANGING) {
         display_string(0, "enter");
     }
